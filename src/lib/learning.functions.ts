@@ -655,7 +655,7 @@ const revealMcqsSchema = z.object({
 
 export const revealMcqAnswers = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((i: z.infer<typeof revealSchema>) => revealSchema.parse(i))
+  .inputValidator((i: z.infer<typeof revealMcqsSchema>) => revealMcqsSchema.parse(i))
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     // Evidence the caller has actually answered each MCQ.
