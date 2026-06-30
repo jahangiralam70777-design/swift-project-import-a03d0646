@@ -1169,7 +1169,7 @@ export function McqFlow() {
           // would double-count every submission. Only submit-end mode
           // needs the batch flush.
           if (sessionMode === "submit-end") {
-            await recordPracticeProgressFn({
+            const res = await recordPracticeProgressFn({
               data: {
                 level: level ?? null,
                 subjectId: subjectId ?? null,
@@ -1177,6 +1177,9 @@ export function McqFlow() {
                 answers: progressAnswers,
               },
             });
+            ingestReveals(
+              ((res as { reveals?: Array<{ id: string; correct_option: string | null; explanation: string | null }> } | undefined)?.reveals) ?? [],
+            );
           }
         } catch (e) {
           debugMcq("record practice progress failed", e);
