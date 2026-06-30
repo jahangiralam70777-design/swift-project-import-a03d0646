@@ -89,7 +89,10 @@ async function loadVisibility(supabase: unknown): Promise<Visibility> {
 export const getShortNotesVisibility = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator(noInput)
-  .handler(async ({ context }) => loadVisibility(context.supabase));
+  .handler(async ({ context }) => {
+    await assertPermission(context.supabase, context.userId, "manage_content", "short_notes.read_visibility");
+    return loadVisibility(context.supabase);
+  });
 
 const visInput = z.object({
   section_hidden: z.boolean(),

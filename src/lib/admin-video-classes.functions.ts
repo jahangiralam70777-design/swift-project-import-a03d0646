@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
 import { sanitizeSearchTerm } from "@/lib/admin-search-sanitize";
 import { syncModuleHiddenFlag } from "@/lib/module-visibility.functions";
+import { noInput } from "@/lib/validate";
 
 const statusEnum = z.enum(["draft", "published", "archived"]);
 const kindEnum = z.enum(["youtube", "playlist", "upload"]);
@@ -109,7 +110,11 @@ async function loadVisibility(supabase: unknown): Promise<Visibility> {
 
 export const getVideoClassVisibility = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => loadVisibility(context.supabase));
+  .inputValidator(noInput)
+  .handler(async ({ context }) => {
+    await assertPermission(context.supabase, context.userId, "manage_content", "video_classes.read_visibility");
+    return loadVisibility(context.supabase);
+  });
 
 const visInput = z.object({
   section_hidden: z.boolean(),
