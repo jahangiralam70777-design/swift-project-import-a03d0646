@@ -973,7 +973,7 @@ export function McqFlow() {
       try {
         if (chosen !== null) {
           try {
-            await recordPracticeProgressFn({
+            const res = await recordPracticeProgressFn({
               data: {
                 level: level ?? null,
                 subjectId: subjectId ?? null,
@@ -981,6 +981,9 @@ export function McqFlow() {
                 answers: [{ mcqId, chosen, timeMs: Math.min(timeMs, 60 * 60 * 1000) }],
               },
             });
+            ingestReveals(
+              ((res as { reveals?: Array<{ id: string; correct_option: string | null; explanation: string | null }> } | undefined)?.reveals) ?? [],
+            );
           } catch (e) {
             debugMcq("practice progress record failed", e);
           } finally {
