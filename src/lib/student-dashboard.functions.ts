@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
@@ -6,10 +7,32 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
  * one query + one realtime invalidator. RLS is respected via the
  * `requireSupabaseAuth` middleware so each call is scoped to the caller.
  */
-export const studentDashboardSnapshot = createServerFn({ method: "GET" })
+const snapshotSchema = z
+  .object({
+    // P3a-Dash-C2: client passes its IANA timezone so the streak is computed
+    // in the student's local day boundary, not UTC. Defaults to UTC if the
+    // client sends nothing (legacy callers).
+    tz: z.string().trim().min(1).max(64).optional(),
+  })
+  .optional();
+
+export const studentDashboardSnapshot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((i: z.infer<typeof snapshotSchema>) => snapshotSchema.parse(i))
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const tz = data?.tz ?? "UTC";
+    // dayKey: YYYY-MM-DD in the requested timezone. Intl handles DST.
+    const dayFmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const dayKey = (d: Date | string): string => {
+      const date = typeof d === "string" ? new Date(d) : d;
+      return dayFmt.format(date); // en-CA renders YYYY-MM-DD
+    };
 
     const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
