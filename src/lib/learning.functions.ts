@@ -421,7 +421,11 @@ export const recordMcqPracticeProgress = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const answered = data.answers.filter((a) => a.chosen !== null);
-    if (!answered.length) return { recorded: 0 };
+    if (!answered.length)
+      return {
+        recorded: 0,
+        reveals: [] as Array<{ id: string; correct_option: string; explanation: string | null }>,
+      };
 
     const ids = Array.from(new Set(answered.map((a) => a.mcqId)));
     const { data: mcqRows, error: mcqError } = await supabase
