@@ -106,9 +106,19 @@ export function DashContent() {
   const userName = user?.name ?? "Learner";
 
   const fetchSnapshot = useServerFn(studentDashboardSnapshot);
+  // Read once at mount — cheap and stable per device for the lifetime of
+  // a session. Wrapped in try/catch because old browsers / SSR contexts
+  // may not expose Intl.DateTimeFormat().resolvedOptions().timeZone.
+  const tz = (() => {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    } catch {
+      return "UTC";
+    }
+  })();
   const { data } = useQuery({
-    queryKey: ["student-dashboard-snapshot", "submission-counts-v3", user?.id ?? "pending"],
-    queryFn: () => fetchSnapshot(),
+    queryKey: ["student-dashboard-snapshot", "submission-counts-v3", user?.id ?? "pending", tz],
+    queryFn: () => fetchSnapshot({ data: { tz } }),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
     refetchOnWindowFocus: false,
