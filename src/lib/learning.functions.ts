@@ -421,12 +421,16 @@ export const recordMcqPracticeProgress = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
     const answered = data.answers.filter((a) => a.chosen !== null);
-    if (!answered.length) return { recorded: 0 };
+    if (!answered.length)
+      return {
+        recorded: 0,
+        reveals: [] as Array<{ id: string; correct_option: string; explanation: string | null }>,
+      };
 
     const ids = Array.from(new Set(answered.map((a) => a.mcqId)));
     const { data: mcqRows, error: mcqError } = await supabase
       .from("mcqs")
-      .select("id,chapter_id,correct_option,status")
+      .select("id,chapter_id,correct_option,explanation,status")
       .in("id", ids)
       .eq("status", "published");
     if (mcqError) throw mcqError;
@@ -551,7 +555,20 @@ export const recordMcqPracticeProgress = createServerFn({ method: "POST" })
       recorded = rows.length;
     }
 
-    return { recorded };
+    // P3a-McQ-C1: piggyback reveal data for the just-submitted MCQs so the
+    // client can render correct/wrong + explanation WITHOUT pre-fetching the
+    // answer key via listMcqs. The student already answered, so leaking
+    // correct_option back is intentional and scoped to these IDs only.
+    const reveals = ((mcqRows ?? []) as Array<{
+      id: string;
+      correct_option: string;
+      explanation: string | null;
+    }>).map((m) => ({
+      id: m.id,
+      correct_option: m.correct_option,
+      explanation: m.explanation ?? null,
+    }));
+    return { recorded, reveals };
   });
 
 // ---- Chapters ----
@@ -610,7 +627,7 @@ export const listMcqs = createServerFn({ method: "POST" })
       option_b: string;
       option_c: string;
       option_d: string;
-      correct_option: string;
+      correct_option: string | null;
       explanation: string | null;
       tags: string[] | null;
     }> = [];
@@ -618,9 +635,11 @@ export const listMcqs = createServerFn({ method: "POST" })
       const to = Math.min(from + PAGE_SIZE - 1, maxRows - 1);
       let q = sb
         .from("mcqs")
-        .select(
-          "id,question,option_a,option_b,option_c,option_d,correct_option,explanation,tags",
-        )
+        // P3a-McQ-C1: NEVER project correct_option/explanation in the
+        // pre-submission list. They are revealed per-MCQ via
+        // recordMcqPracticeProgress (on submit) or revealMcqAnswers
+        // (for review/wrong-questions rehydration, gated by attempt evidence).
+        .select("id,question,option_a,option_b,option_c,option_d,tags")
         .eq("status", "published")
         .order("created_at", { ascending: true })
         .range(from, to);
@@ -628,10 +647,57 @@ export const listMcqs = createServerFn({ method: "POST" })
       else if (chapterIds) q = q.in("chapter_id", chapterIds);
       const { data: page, error } = await q;
       if (error) throw error;
-      rows.push(...(page ?? []));
+      rows.push(
+        ...((page ?? []).map((r) => ({
+          ...r,
+          correct_option: null as string | null,
+          explanation: null as string | null,
+        }))),
+      );
       if (!page || page.length < to - from + 1) break;
     }
     return rows;
+  });
+
+// P3a-McQ-C1: post-submission reveal. Returns correct_option + explanation
+// ONLY for MCQs the caller has demonstrably attempted (mcq_practice_progress
+// row OR attempt_answers row). Prevents enumeration of answer-keys for
+// quizzes the user hasn't taken. Used by:
+//   * McqFlow review screen (after batch finalize)
+//   * WrongQuestionsFlow (user already attempted these by definition)
+//   * Resume-progress rehydration
+const revealMcqsSchema = z.object({
+  mcqIds: z.array(z.string().uuid()).min(1).max(500),
+});
+
+export const revealMcqAnswers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i: z.infer<typeof revealMcqsSchema>) => revealMcqsSchema.parse(i))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    // Evidence the caller has actually answered each MCQ.
+    const [practiceR, attemptR] = await Promise.all([
+      supabase
+        .from("mcq_practice_progress")
+        .select("mcq_id")
+        .eq("user_id", userId)
+        .in("mcq_id", data.mcqIds),
+      supabase
+        .from("attempt_answers")
+        .select("mcq_id,exam_attempts!inner(user_id)")
+        .eq("exam_attempts.user_id", userId)
+        .in("mcq_id", data.mcqIds),
+    ]);
+    const allowed = new Set<string>();
+    for (const r of practiceR.data ?? []) allowed.add(r.mcq_id);
+    for (const r of attemptR.data ?? []) allowed.add(r.mcq_id);
+    if (!allowed.size) return [] as Array<{ id: string; correct_option: string; explanation: string | null }>;
+    const { data: mcqs, error } = await supabase
+      .from("mcqs")
+      .select("id,correct_option,explanation")
+      .in("id", Array.from(allowed));
+    if (error) throw error;
+    return (mcqs ?? []) as Array<{ id: string; correct_option: string; explanation: string | null }>;
   });
 
 // ---- Quizzes ----
@@ -776,10 +842,31 @@ export const submitAttempt = createServerFn({ method: "POST" })
     const { data: quizMeta } = await supabase
       .from("quizzes")
       .select(
-        "id,title,subject_id,chapter_id,level,kind,negative_marking,total_questions,duration_seconds",
+        "id,title,subject_id,chapter_id,level,kind,negative_marking,total_questions,duration_seconds,max_attempts",
       )
       .eq("id", data.quizId)
       .maybeSingle();
+
+    // P3a-Q-H3: server-authoritative max-attempts cap. NULL or <=0 means
+    // unlimited (default, backward compatible). Count only finalized
+    // attempts so an in-flight resume doesn't burn the cap.
+    const maxAttempts = quizMeta && typeof (quizMeta as { max_attempts?: number | null }).max_attempts === "number"
+      ? (quizMeta as { max_attempts: number | null }).max_attempts
+      : null;
+    if (maxAttempts && maxAttempts > 0) {
+      const { count: prior, error: cErr } = await supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("quiz_id", data.quizId)
+        .in("status", ["completed", "submitted"]);
+      if (cErr) throw cErr;
+      if ((prior ?? 0) >= maxAttempts) {
+        throw new Error(
+          `Attempt limit reached: this assessment allows at most ${maxAttempts} submission${maxAttempts === 1 ? "" : "s"}.`,
+        );
+      }
+    }
 
     const submittedAnswers = data.answers.filter((a) => a.chosen !== null);
     let correct = 0;

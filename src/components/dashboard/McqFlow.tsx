@@ -49,6 +49,7 @@ import {
   listChapterProgress,
   listChapterPracticeAnswers,
   recordMcqPracticeProgress,
+  revealMcqAnswers,
 } from "@/lib/learning.functions";
 import { useLevels } from "@/hooks/use-levels";
 import { saveSessionAttempt } from "@/lib/student-performance.functions";
@@ -423,6 +424,34 @@ export function McqFlow() {
   const listChapterProgressFn = useServerFn(listChapterProgress);
   const listChapterPracticeAnswersFn = useServerFn(listChapterPracticeAnswers);
   const recordPracticeProgressFn = useServerFn(recordMcqPracticeProgress);
+  const revealMcqAnswersFn = useServerFn(revealMcqAnswers);
+
+  // P3a-McQ-C1: server no longer ships correct_option/explanation in listMcqs.
+  // We accumulate reveals from (a) per-submit `recordMcqPracticeProgress`
+  // response, and (b) `revealMcqAnswers` calls for review / hydrate paths
+  // (those calls are server-gated to MCQs the user has actually attempted).
+  const revealMapRef = useRef<Map<string, { correct_option: string | null; explanation: string | null }>>(new Map());
+  const [revealVersion, setRevealVersion] = useState(0);
+  const bumpReveal = useCallback(() => setRevealVersion((v) => v + 1), []);
+  const ingestReveals = useCallback(
+    (items: Array<{ id: string; correct_option: string | null; explanation: string | null }>) => {
+      if (!items?.length) return;
+      let changed = false;
+      for (const it of items) {
+        if (!it?.id) continue;
+        const prev = revealMapRef.current.get(it.id);
+        if (!prev || prev.correct_option !== it.correct_option || prev.explanation !== it.explanation) {
+          revealMapRef.current.set(it.id, {
+            correct_option: it.correct_option ?? null,
+            explanation: it.explanation ?? null,
+          });
+          changed = true;
+        }
+      }
+      if (changed) bumpReveal();
+    },
+    [bumpReveal],
+  );
   const saveAttemptFn = useServerFn(saveSessionAttempt);
   const toggleBookmarkFn = useServerFn(toggleMcqBookmark);
   const listBookmarkIdsFn = useServerFn(listMyBookmarkIds);
@@ -554,7 +583,24 @@ export function McqFlow() {
   });
 
   // Full chapter (all MCQs), optionally truncated by session config.
-  const rawMcqs = useMemo(() => (mcqsQ.data ?? []) as Mcq[], [mcqsQ.data]);
+  // P3a-McQ-C1: merge revealMap so any downstream code reading m.correct_option
+  // / m.explanation keeps working. Pre-submit MCQs read null, which the UI
+  // already treats as "not yet revealed" (selection state, review chip).
+  const rawMcqs = useMemo(() => {
+    const base = (mcqsQ.data ?? []) as Mcq[];
+    if (!revealMapRef.current.size) return base;
+    return base.map((m) => {
+      const rv = revealMapRef.current.get(m.id);
+      if (!rv) return m;
+      return {
+        ...m,
+        correct_option: rv.correct_option ?? m.correct_option ?? null,
+        explanation: rv.explanation ?? m.explanation ?? null,
+      };
+    });
+    // revealVersion is intentional: bump triggers recomputation of the merge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mcqsQ.data, revealVersion]);
   const allMcqs = useMemo(() => {
     if (sessionCount === "all") return rawMcqs;
     const n = Number(sessionCount);
@@ -605,6 +651,39 @@ export function McqFlow() {
     forceFreshChapterRef.current = null;
     pendingSnapshotAnswersRef.current = null;
     questionStartRef.current = Date.now();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
+
+  // P3a-McQ-C1: hydrate revealMap for MCQs the user has already attempted
+  // (rows present in practiceAnswers). Server gates `revealMcqAnswers` to
+  // attempted-only MCQs, so unattempted IDs are filtered out before sending.
+  useEffect(() => {
+    if (!chapterId || !mcqsQ.isSuccess || !practiceAnswersQ.isSuccess) return;
+    const attempted = new Set(
+      ((practiceAnswersQ.data ?? []) as Array<{ mcq_id?: string }>)
+        .map((r) => r?.mcq_id)
+        .filter((x): x is string => !!x),
+    );
+    const missing: string[] = [];
+    for (const m of allMcqs) {
+      if (attempted.has(m.id) && !revealMapRef.current.has(m.id)) missing.push(m.id);
+    }
+    if (!missing.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await revealMcqAnswersFn({ data: { mcqIds: missing.slice(0, 500) } });
+        if (cancelled) return;
+        ingestReveals(
+          (res as Array<{ id: string; correct_option: string | null; explanation: string | null }>) ?? [],
+        );
+      } catch (e) {
+        debugMcq("reveal hydrate failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
 
@@ -927,7 +1006,7 @@ export function McqFlow() {
       try {
         if (chosen !== null) {
           try {
-            await recordPracticeProgressFn({
+            const res = await recordPracticeProgressFn({
               data: {
                 level: level ?? null,
                 subjectId: subjectId ?? null,
@@ -935,6 +1014,9 @@ export function McqFlow() {
                 answers: [{ mcqId, chosen, timeMs: Math.min(timeMs, 60 * 60 * 1000) }],
               },
             });
+            ingestReveals(
+              ((res as { reveals?: Array<{ id: string; correct_option: string | null; explanation: string | null }> } | undefined)?.reveals) ?? [],
+            );
           } catch (e) {
             debugMcq("practice progress record failed", e);
           } finally {
@@ -1120,7 +1202,7 @@ export function McqFlow() {
           // would double-count every submission. Only submit-end mode
           // needs the batch flush.
           if (sessionMode === "submit-end") {
-            await recordPracticeProgressFn({
+            const res = await recordPracticeProgressFn({
               data: {
                 level: level ?? null,
                 subjectId: subjectId ?? null,
@@ -1128,6 +1210,9 @@ export function McqFlow() {
                 answers: progressAnswers,
               },
             });
+            ingestReveals(
+              ((res as { reveals?: Array<{ id: string; correct_option: string | null; explanation: string | null }> } | undefined)?.reveals) ?? [],
+            );
           }
         } catch (e) {
           debugMcq("record practice progress failed", e);

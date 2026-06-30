@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 
 /**
@@ -6,10 +7,32 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
  * one query + one realtime invalidator. RLS is respected via the
  * `requireSupabaseAuth` middleware so each call is scoped to the caller.
  */
-export const studentDashboardSnapshot = createServerFn({ method: "GET" })
+const snapshotSchema = z
+  .object({
+    // P3a-Dash-C2: client passes its IANA timezone so the streak is computed
+    // in the student's local day boundary, not UTC. Defaults to UTC if the
+    // client sends nothing (legacy callers).
+    tz: z.string().trim().min(1).max(64).optional(),
+  })
+  .optional();
+
+export const studentDashboardSnapshot = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((i: z.infer<typeof snapshotSchema>) => snapshotSchema.parse(i))
+  .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
+    const tz = data?.tz ?? "UTC";
+    // dayKey: YYYY-MM-DD in the requested timezone. Intl handles DST.
+    const dayFmt = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    });
+    const dayKey = (d: Date | string): string => {
+      const date = typeof d === "string" ? new Date(d) : d;
+      return dayFmt.format(date); // en-CA renders YYYY-MM-DD
+    };
 
     const since30 = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const since7 = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -245,22 +268,30 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
     );
     const accuracy = totals.total > 0 ? Math.round((totals.correct / totals.total) * 1000) / 10 : 0;
 
-    // Streak: consecutive days (in user TZ approximated as UTC) ending today/yesterday with ≥1 completion
-    const dayKeys = new Set(
-      completed
-        .map((a) => a.completed_at ?? a.started_at)
-        .filter(Boolean)
-        .map((d) => new Date(d as string).toISOString().slice(0, 10)),
-    );
-    let streak = 0;
-    const cursor = new Date();
-    // Allow today to be empty without breaking the streak
-    if (!dayKeys.has(cursor.toISOString().slice(0, 10))) {
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    // P3a-Dash-C2: streak day boundaries computed in the student's IANA
+    // timezone (Intl.DateTimeFormat handles DST). Includes mcq_practice
+    // submissions as activity (a student who only practices MCQs still
+    // maintains a streak), not just completed quiz/mock attempts.
+    const dayKeys = new Set<string>();
+    for (const a of completed) {
+      const ts = a.completed_at ?? a.started_at;
+      if (ts) dayKeys.add(dayKey(ts));
     }
-    while (dayKeys.has(cursor.toISOString().slice(0, 10))) {
+    for (const a of submittedAnswers) {
+      if (a.kind === "mcq_practice" && a.at) dayKeys.add(dayKey(a.at));
+    }
+    let streak = 0;
+    // Step day-by-day in the requested TZ. Compute the "day cursor" by
+    // taking now, formatting, and subtracting 24h to step back. DST shifts
+    // (23/25-hour days) are safe because we re-format every iteration.
+    let cursorMs = Date.now();
+    // Allow today to be empty without breaking the streak.
+    if (!dayKeys.has(dayKey(new Date(cursorMs)))) {
+      cursorMs -= 24 * 60 * 60 * 1000;
+    }
+    while (dayKeys.has(dayKey(new Date(cursorMs)))) {
       streak += 1;
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
+      cursorMs -= 24 * 60 * 60 * 1000;
     }
 
     // Weekly bars (Mon..Sun accuracy of attempts that day, 0 if none)
