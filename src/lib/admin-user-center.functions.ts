@@ -548,7 +548,7 @@ export const getUserTimeline = createServerFn({ method: "POST" })
     }
 
     let filtered = items;
-    if (data.kinds?.length) filtered = filtered.filter((e) => data.kinds!.includes(e.kind));
+    if (data.kinds?.length) filtered = filtered.filter((e) => (data.kinds as string[]).includes(e.kind));
     if (data.search) {
       const s = data.search.toLowerCase();
       filtered = filtered.filter(
