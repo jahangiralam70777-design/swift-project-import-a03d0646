@@ -775,7 +775,9 @@ export const submitAttempt = createServerFn({ method: "POST" })
     // the admin (H-1 fix).
     const { data: quizMeta } = await supabase
       .from("quizzes")
-      .select("id,title,subject_id,chapter_id,level,kind,negative_marking")
+      .select(
+        "id,title,subject_id,chapter_id,level,kind,negative_marking,total_questions,duration_seconds",
+      )
       .eq("id", data.quizId)
       .maybeSingle();
 
@@ -794,13 +796,32 @@ export const submitAttempt = createServerFn({ method: "POST" })
       };
     });
 
+    // P3a-Q-C2: denominator MUST be the full question count (cheat-proofs
+    // "skip everything but the easy 3" exploit). Fall back to delivered
+    // answer count only if quizMeta lacks total_questions.
+    const totalQuestions =
+      (typeof quizMeta?.total_questions === "number" && quizMeta.total_questions > 0
+        ? quizMeta.total_questions
+        : null) ?? data.answers.length;
     const total = submittedAnswers.length;
     // H-1: apply per-quiz negative marking. `negative_marking` is the fractional
     // penalty per wrong answer (e.g. 0.25 = -25% of one mark). Clamp at 0 so
     // a heavily-penalised attempt never reports a negative percentage.
     const negFactor = Number(quizMeta?.negative_marking ?? 0) || 0;
     const rawCorrect = Math.max(0, correct - wrong * negFactor);
-    const score = total === 0 ? 0 : Math.max(0, Math.round((rawCorrect / total) * 100));
+    const score =
+      totalQuestions === 0
+        ? 0
+        : Math.max(0, Math.round((rawCorrect / totalQuestions) * 100));
+
+    // P3a-Q-H1: clamp duration to the quiz's configured window so the
+    // leaderboard (sorted by ASC duration_seconds) cannot be gamed by a
+    // client sending durationSeconds: 1.
+    const maxDuration =
+      typeof quizMeta?.duration_seconds === "number" && quizMeta.duration_seconds > 0
+        ? quizMeta.duration_seconds
+        : data.durationSeconds;
+    const clampedDuration = Math.min(data.durationSeconds, maxDuration);
     const attemptKind = (quizMeta?.kind === "mock" ? "mock" : "quiz") as "quiz" | "mock";
 
 
@@ -829,9 +850,9 @@ export const submitAttempt = createServerFn({ method: "POST" })
         attempt_number: attemptNumber,
         status: "completed",
         completed_at: new Date().toISOString(),
-        duration_seconds: data.durationSeconds,
+        duration_seconds: clampedDuration,
         correct_count: correct,
-        total_count: total,
+        total_count: totalQuestions,
         score,
       })
       .select("id")

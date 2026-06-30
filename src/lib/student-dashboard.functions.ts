@@ -93,6 +93,11 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       upcomingMockR,
       recommendedQuizR,
       subjectsR,
+      // P3a-Dash-H1: all-time submission totals (`counts.quizzes` /
+      // `counts.mocks`) were previously aliased to the weekly count, so the
+      // UI showed "5 Quizzes · +5 this week" forever.
+      totalQuizSubmissionsR,
+      totalMockSubmissionsR,
     ] = await Promise.all([
       supabase.from("mcqs").select("id", { count: "exact", head: true }).eq("status", "published"),
       supabase
@@ -127,8 +132,13 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         .limit(50),
       supabase
         .from("notifications")
-        .select("id,title,body,priority,sent_at,created_at,type")
+        .select("id,title,body,priority,sent_at,created_at,type,user_id")
         .eq("status", "sent")
+        // P3a-Dash-C4: notifications must be scoped to this user OR be a
+        // platform-wide broadcast (user_id IS NULL). Without this filter
+        // the snapshot leaked every user-targeted notification to every
+        // student.
+        .or(`user_id.is.null,user_id.eq.${userId}`)
         .order("sent_at", { ascending: false, nullsFirst: false })
         .limit(6),
       supabase
@@ -136,6 +146,9 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         .select("id,title,total_questions,duration_seconds,starts_at,kind,created_at")
         .eq("status", "published")
         .eq("kind", "mock")
+        // P3a-Dash-H4: only surface mocks that have NOT yet started, so the
+        // "Upcoming Mock" card never shows an expired test.
+        .gte("starts_at", new Date().toISOString())
         .order("starts_at", { ascending: true, nullsFirst: false })
         .limit(1),
       supabase
@@ -148,6 +161,18 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         .order("created_at", { ascending: false })
         .limit(8),
       supabase.from("subjects").select("id,name,color").eq("status", "published"),
+      supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("kind", "quiz")
+        .in("status", ["completed", "submitted"]),
+      supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("kind", "mock")
+        .in("status", ["completed", "submitted"]),
     ]);
 
     const attempts = attemptsR.data ?? [];
@@ -328,9 +353,9 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       counts: {
         mcqs: mcqCountR.count ?? 0,
         mcqsThisWeek: mcqWeekR.count ?? 0,
-        quizzes: weeklySubmissionCounts.quiz,
+        quizzes: totalQuizSubmissionsR.count ?? 0,
         quizzesThisWeek: weeklySubmissionCounts.quiz,
-        mocks: weeklySubmissionCounts.mock,
+        mocks: totalMockSubmissionsR.count ?? 0,
         mocksThisWeek: weeklySubmissionCounts.mock,
         availableMocks: availableMockCountR.count ?? 0,
         notes: notesCountR.count ?? 0,

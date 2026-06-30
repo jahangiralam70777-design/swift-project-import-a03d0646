@@ -1101,7 +1101,7 @@ function ResultStage({
                           : "bg-muted text-muted-foreground"
                   }`}
                 >
-                  #{i + 1}
+                  #{u.rank ?? i + 1}
                 </div>
                 <div className="flex-1">
                   <div className="text-sm font-semibold">{u.is_you ? "You" : u.name}</div>
