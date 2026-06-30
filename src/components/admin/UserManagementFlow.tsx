@@ -2502,20 +2502,13 @@ function PermissionsMatrix() {
   const { data, isLoading } = useQuery({
     queryKey: ["admin", "role-permissions"],
     queryFn: () => fetchPerms(),
+    // role_permissions is intentionally NOT in the realtime publication
+    // (sensitive global table). Poll every 15s so a second admin's edits
+    // surface without a manual refresh.
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
   });
 
-  // realtime sync
-  useEffect(() => {
-    const ch = supabase
-      .channel(`role-permissions-rt-${Math.random().toString(36).slice(2, 8)}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "role_permissions" }, () => {
-        qc.invalidateQueries({ queryKey: ["admin", "role-permissions"] });
-      })
-      .subscribe();
-    return () => {
-      supabase.removeChannel(ch);
-    };
-  }, [qc]);
 
   const mut = useMutation({
     mutationFn: (v: { role: RbacRole; permission: string; enabled: boolean }) =>

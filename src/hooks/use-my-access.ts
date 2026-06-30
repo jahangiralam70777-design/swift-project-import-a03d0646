@@ -76,9 +76,14 @@ export function useMyAccess(): MyAccess {
 }
 
 /**
- * Subscribe once at the admin layout. Any change to role_permissions,
- * page_access, app_pages, or the caller's own user_roles row invalidates the
+ * Subscribe once at the admin layout. Any change to page_access, app_pages,
+ * permission_audit_log, or the caller's own user_roles row invalidates the
  * RBAC caches → guards re-render in the next frame.
+ *
+ * NOTE: `role_permissions` is intentionally NOT in the realtime publication
+ * (see security hardening migration 20260610120000 + DB-H1 reconciliation).
+ * Role-permission edits are admin-rare; the matrix editor polls via
+ * `refetchInterval` and other invalidations cover the rest.
  */
 export function useRbacRealtime(userId: string | null) {
   const qc = useQueryClient();
@@ -91,7 +96,7 @@ export function useRbacRealtime(userId: string | null) {
     };
     const ch = supabase
       .channel(`rbac:${userId}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "role_permissions" }, invalidate)
+
       .on("postgres_changes", { event: "*", schema: "public", table: "page_access" }, invalidate)
       .on("postgres_changes", { event: "*", schema: "public", table: "app_pages" }, invalidate)
       .on("postgres_changes", { event: "*", schema: "public", table: "permission_audit_log" },
