@@ -850,9 +850,9 @@ export const submitAttempt = createServerFn({ method: "POST" })
         attempt_number: attemptNumber,
         status: "completed",
         completed_at: new Date().toISOString(),
-        duration_seconds: data.durationSeconds,
+        duration_seconds: clampedDuration,
         correct_count: correct,
-        total_count: total,
+        total_count: totalQuestions,
         score,
       })
       .select("id")
