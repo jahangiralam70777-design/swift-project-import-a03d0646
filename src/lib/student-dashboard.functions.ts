@@ -161,6 +161,18 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         .order("created_at", { ascending: false })
         .limit(8),
       supabase.from("subjects").select("id,name,color").eq("status", "published"),
+      supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("kind", "quiz")
+        .in("status", ["completed", "submitted"]),
+      supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("kind", "mock")
+        .in("status", ["completed", "submitted"]),
     ]);
 
     const attempts = attemptsR.data ?? [];
