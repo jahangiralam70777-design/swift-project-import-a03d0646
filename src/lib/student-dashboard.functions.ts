@@ -353,9 +353,9 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       counts: {
         mcqs: mcqCountR.count ?? 0,
         mcqsThisWeek: mcqWeekR.count ?? 0,
-        quizzes: weeklySubmissionCounts.quiz,
+        quizzes: totalQuizSubmissionsR.count ?? 0,
         quizzesThisWeek: weeklySubmissionCounts.quiz,
-        mocks: weeklySubmissionCounts.mock,
+        mocks: totalMockSubmissionsR.count ?? 0,
         mocksThisWeek: weeklySubmissionCounts.mock,
         availableMocks: availableMockCountR.count ?? 0,
         notes: notesCountR.count ?? 0,
