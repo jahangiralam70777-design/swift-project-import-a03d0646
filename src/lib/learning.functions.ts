@@ -776,10 +776,31 @@ export const submitAttempt = createServerFn({ method: "POST" })
     const { data: quizMeta } = await supabase
       .from("quizzes")
       .select(
-        "id,title,subject_id,chapter_id,level,kind,negative_marking,total_questions,duration_seconds",
+        "id,title,subject_id,chapter_id,level,kind,negative_marking,total_questions,duration_seconds,max_attempts",
       )
       .eq("id", data.quizId)
       .maybeSingle();
+
+    // P3a-Q-H3: server-authoritative max-attempts cap. NULL or <=0 means
+    // unlimited (default, backward compatible). Count only finalized
+    // attempts so an in-flight resume doesn't burn the cap.
+    const maxAttempts = quizMeta && typeof (quizMeta as { max_attempts?: number | null }).max_attempts === "number"
+      ? (quizMeta as { max_attempts: number | null }).max_attempts
+      : null;
+    if (maxAttempts && maxAttempts > 0) {
+      const { count: prior, error: cErr } = await supabase
+        .from("exam_attempts")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("quiz_id", data.quizId)
+        .in("status", ["completed", "submitted"]);
+      if (cErr) throw cErr;
+      if ((prior ?? 0) >= maxAttempts) {
+        throw new Error(
+          `Attempt limit reached: this assessment allows at most ${maxAttempts} submission${maxAttempts === 1 ? "" : "s"}.`,
+        );
+      }
+    }
 
     const submittedAnswers = data.answers.filter((a) => a.chosen !== null);
     let correct = 0;
