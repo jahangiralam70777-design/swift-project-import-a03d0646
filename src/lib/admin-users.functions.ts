@@ -291,7 +291,7 @@ export const adminReferralStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({}).strict().optional().parse(d) ?? {})
   .handler(async ({ context }) => {
-    await assertPermission(context.supabase, context.userId, "manage_users");
+    await assertPermission(context.supabase, context.userId, "manage_users", "users.referral_stats");
     const { data, error } = await (
       context.supabase as unknown as {
         from: (t: string) => {

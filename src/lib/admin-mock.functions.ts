@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
+import { noInput } from "@/lib/validate";
 import { mcqBulkImportItemSchema } from "@/lib/mcq-bulk-schema";
 
 const levelCode = z.string().trim().min(1).max(40);
@@ -198,6 +199,7 @@ export const adminListMocks = createServerFn({ method: "POST" })
 // not just the currently loaded page of rows.
 export const adminMockStats = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }) => {
     await assertPermission(context.supabase, context.userId, "manage_content");
     const sb = context.supabase;
@@ -681,6 +683,7 @@ export const adminListLiveMocks = createServerFn({ method: "POST" })
 // largest mocks by question count. All real Supabase reads.
 export const adminMockBreakdowns = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }) => {
     await assertPermission(context.supabase, context.userId, "manage_content");
     const sb = context.supabase;

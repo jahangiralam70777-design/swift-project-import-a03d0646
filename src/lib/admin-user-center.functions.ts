@@ -290,13 +290,16 @@ export const applyBan = createServerFn({ method: "POST" })
 
     const { supabaseAdmin: _sa } = await import("@/integrations/supabase/client.server"); const supabaseAdmin: any = _sa as any;
 
-    // Refuse to ban another admin via this path (must be demoted first).
-    const { data: targetIsAdmin } = await (context.supabase as any).rpc("has_role", {
-      _user_id: data.userId,
-      _role: "admin",
-    });
-    if (targetIsAdmin === true) {
-      throw new Error("Cannot ban an admin. Demote them first.");
+    // Refuse to ban another admin/super_admin via this path (must be demoted first).
+    const { data: targetRoles } = await (context.supabase as any)
+      .from("user_roles")
+      .select("role")
+      .eq("user_id", data.userId);
+    const isPrivileged = ((targetRoles ?? []) as Array<{ role: string }>).some(
+      (r) => r.role === "admin" || r.role === "super_admin" || r.role === "moderator",
+    );
+    if (isPrivileged) {
+      throw new Error("Cannot ban a privileged user (admin / super_admin / moderator). Demote them first.");
     }
 
     const { error: insErr } = await supabaseAdmin.from("user_bans").insert({
@@ -442,7 +445,7 @@ export const getUserTimeline = createServerFn({ method: "POST" })
       .object({
         userId: uuid,
         days: z.number().int().min(1).max(365).default(90),
-        kinds: z.array(z.string()).optional(),
+        kinds: z.array(z.enum(["login", "admin", "ban", "message", "note"])).optional(),
         search: z.string().trim().max(120).optional(),
       })
       .parse(i),

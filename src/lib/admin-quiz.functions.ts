@@ -507,6 +507,15 @@ export const adminSetQuizQuestions = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     await assertPermission(context.supabase, context.userId, "manage_content");
     const sb = context.supabase;
+    // Verify the target quiz exists before mutating quiz_questions, otherwise a
+    // crafted UUID silently no-ops the delete but inserts orphaned rows.
+    const { data: quizRow, error: quizErr } = await sb
+      .from("quizzes")
+      .select("id")
+      .eq("id", data.quizId)
+      .maybeSingle();
+    if (quizErr) throw quizErr;
+    if (!quizRow) throw new Error("Quiz not found");
     await sb.from("quiz_questions").delete().eq("quiz_id", data.quizId);
     if (data.mcqIds.length) {
       const rows = data.mcqIds.map((mcq_id, i) => ({ quiz_id: data.quizId, mcq_id, position: i }));

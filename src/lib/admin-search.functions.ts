@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
 
@@ -18,11 +19,12 @@ export type AdminGlobalSearchResult = {
 
 export const adminGlobalSearch = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: { q: string }) => ({
-    q: String(d?.q ?? "")
-      .trim()
-      .slice(0, 80),
-  }))
+  .inputValidator((d: unknown) => {
+    const parsed = z
+      .object({ q: z.string().trim().max(80).default("") })
+      .parse(d ?? {});
+    return parsed;
+  })
   .handler(async ({ data, context }): Promise<AdminGlobalSearchResult> => {
     await assertPermission(context.supabase, context.userId, "view_analytics");
     const q = data.q;

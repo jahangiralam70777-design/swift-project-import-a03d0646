@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
+import { noInput } from "@/lib/validate";
 
 function parseUA(ua: string | null | undefined) {
   const s = ua ?? "";
@@ -164,6 +165,7 @@ export const adminLoginHeatmap = createServerFn({ method: "POST" })
 
 export const adminRoleBreakdown = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }) => {
     await assertPermission(context.supabase, context.userId, "manage_users");
     // Use the service-role client for admin-wide role reporting. The

@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
+import { noInput } from "@/lib/validate";
 
 export type DatabaseManagerStats = {
   users: {
@@ -62,6 +63,7 @@ function throwIfAnyQueryFailed(results: Array<[string, QueryResultLike]>) {
 
 export const adminGetDatabaseStats = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }): Promise<DatabaseManagerStats> => {
     await assertPermission(context.supabase, context.userId, "manage_system");
     const sb = context.supabase;

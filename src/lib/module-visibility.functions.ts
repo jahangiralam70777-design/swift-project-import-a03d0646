@@ -75,25 +75,34 @@ export async function syncModuleHiddenFlag(
   if (insertError) throw insertError;
 }
 
+// Module-scoped singleton: avoids creating a new TCP-bearing client on every
+// public visibility read. The publishable client has no session state, so it's
+// safe to share across requests on the same Worker isolate.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _publicClient: any | null = null;
+async function getPublicClient() {
+  if (_publicClient) return _publicClient;
+  const { createClient } = await import("@supabase/supabase-js");
+  const url = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  if (!url || !key) return null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _publicClient = createClient<any>(url, key, {
+    auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
+  });
+  return _publicClient;
+}
+
 export const listModuleVisibility = createServerFn({ method: "GET" }).handler(async () => {
   // Public read. Use a server-side publishable client (NOT the browser client,
   // which touches localStorage and is unsafe on the Worker). Any failure here
-  // (rejected key, network blip, missing table) must NOT bubble into the React
-  // tree — sibling public reads use the same graceful-fallback pattern. A
-  // throw here previously surfaced as the global "Something went wrong" page
-  // on every route that reads module visibility.
+  // must NOT bubble into the React tree — return [] on any unexpected error.
   try {
-    const { createClient } = await import("@supabase/supabase-js");
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_PUBLISHABLE_KEY;
-    if (!url || !key) {
+    const supabase = await getPublicClient();
+    if (!supabase) {
       console.warn("listModuleVisibility: missing SUPABASE_URL/PUBLISHABLE_KEY; returning []");
       return [] as ModuleVisibilityRow[];
     }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const supabase = createClient<any>(url, key, {
-      auth: { storage: undefined, persistSession: false, autoRefreshToken: false },
-    });
     const [{ data, error }, flash, notes, qbank, classes] = await Promise.all([
       supabase
         .from("module_visibility")
