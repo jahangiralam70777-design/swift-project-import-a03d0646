@@ -268,22 +268,30 @@ export const studentDashboardSnapshot = createServerFn({ method: "POST" })
     );
     const accuracy = totals.total > 0 ? Math.round((totals.correct / totals.total) * 1000) / 10 : 0;
 
-    // Streak: consecutive days (in user TZ approximated as UTC) ending today/yesterday with ≥1 completion
-    const dayKeys = new Set(
-      completed
-        .map((a) => a.completed_at ?? a.started_at)
-        .filter(Boolean)
-        .map((d) => new Date(d as string).toISOString().slice(0, 10)),
-    );
-    let streak = 0;
-    const cursor = new Date();
-    // Allow today to be empty without breaking the streak
-    if (!dayKeys.has(cursor.toISOString().slice(0, 10))) {
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
+    // P3a-Dash-C2: streak day boundaries computed in the student's IANA
+    // timezone (Intl.DateTimeFormat handles DST). Includes mcq_practice
+    // submissions as activity (a student who only practices MCQs still
+    // maintains a streak), not just completed quiz/mock attempts.
+    const dayKeys = new Set<string>();
+    for (const a of completed) {
+      const ts = a.completed_at ?? a.started_at;
+      if (ts) dayKeys.add(dayKey(ts));
     }
-    while (dayKeys.has(cursor.toISOString().slice(0, 10))) {
+    for (const a of submittedAnswers) {
+      if (a.kind === "mcq_practice" && a.at) dayKeys.add(dayKey(a.at));
+    }
+    let streak = 0;
+    // Step day-by-day in the requested TZ. Compute the "day cursor" by
+    // taking now, formatting, and subtracting 24h to step back. DST shifts
+    // (23/25-hour days) are safe because we re-format every iteration.
+    let cursorMs = Date.now();
+    // Allow today to be empty without breaking the streak.
+    if (!dayKeys.has(dayKey(new Date(cursorMs)))) {
+      cursorMs -= 24 * 60 * 60 * 1000;
+    }
+    while (dayKeys.has(dayKey(new Date(cursorMs)))) {
       streak += 1;
-      cursor.setUTCDate(cursor.getUTCDate() - 1);
+      cursorMs -= 24 * 60 * 60 * 1000;
     }
 
     // Weekly bars (Mon..Sun accuracy of attempts that day, 0 if none)
