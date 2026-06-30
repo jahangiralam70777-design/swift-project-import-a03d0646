@@ -654,6 +654,39 @@ export function McqFlow() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
 
+  // P3a-McQ-C1: hydrate revealMap for MCQs the user has already attempted
+  // (rows present in practiceAnswers). Server gates `revealMcqAnswers` to
+  // attempted-only MCQs, so unattempted IDs are filtered out before sending.
+  useEffect(() => {
+    if (!chapterId || !mcqsQ.isSuccess || !practiceAnswersQ.isSuccess) return;
+    const attempted = new Set(
+      ((practiceAnswersQ.data ?? []) as Array<{ mcq_id?: string }>)
+        .map((r) => r?.mcq_id)
+        .filter((x): x is string => !!x),
+    );
+    const missing: string[] = [];
+    for (const m of allMcqs) {
+      if (attempted.has(m.id) && !revealMapRef.current.has(m.id)) missing.push(m.id);
+    }
+    if (!missing.length) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await revealMcqAnswersFn({ data: { mcqIds: missing.slice(0, 500) } });
+        if (cancelled) return;
+        ingestReveals(
+          (res as Array<{ id: string; correct_option: string | null; explanation: string | null }>) ?? [],
+        );
+      } catch (e) {
+        debugMcq("reveal hydrate failed", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chapterId, mcqsQ.isSuccess, practiceAnswersQ.isSuccess, totalAll]);
+
   // ── Persist MCQ Practice session to sessionStorage on relevant changes. ──
   useEffect(() => {
     if (typeof window === "undefined") return;
