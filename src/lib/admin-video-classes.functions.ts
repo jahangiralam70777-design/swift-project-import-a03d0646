@@ -109,7 +109,11 @@ async function loadVisibility(supabase: unknown): Promise<Visibility> {
 
 export const getVideoClassVisibility = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => loadVisibility(context.supabase));
+  .inputValidator(noInput)
+  .handler(async ({ context }) => {
+    await assertPermission(context.supabase, context.userId, "manage_content", "video_classes.read_visibility");
+    return loadVisibility(context.supabase);
+  });
 
 const visInput = z.object({
   section_hidden: z.boolean(),

@@ -66,6 +66,20 @@ export const toggleRolePermission = createServerFn({ method: "POST" })
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sb = context.supabase as any;
+    // Self-lockout guard: revoking manage_permissions from a role the caller holds
+    // would orphan the matrix. Only super_admin may do so.
+    if (!data.enabled && data.permission === "manage_permissions") {
+      const { data: callerRoles } = await sb
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", context.userId);
+      const roles = ((callerRoles ?? []) as Array<{ role: string }>).map((r) => r.role);
+      if (roles.includes(data.role) && !roles.includes("super_admin")) {
+        throw new Error(
+          "Refusing to revoke manage_permissions from a role you hold. Ask a super_admin.",
+        );
+      }
+    }
     if (data.enabled) {
       const { error } = await sb
         .from("role_permissions")

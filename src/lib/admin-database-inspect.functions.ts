@@ -363,11 +363,21 @@ export const adminListTableRows = createServerFn({ method: "POST" })
     return { table, rows: safeRows, total: res.count ?? rows.length, page, pageSize, columns };
   });
 
-const deleteInput = z.object({
-  table: z.string().min(1).max(63),
-  id: z.string().min(1).max(200),
-  idColumn: z.string().min(1).max(64).default("id"),
-});
+const deleteInput = z
+  .object({
+    table: z.string().min(1).max(63),
+    id: z.string().min(1).max(200),
+    idColumn: z.string().min(1).max(64).default("id"),
+  })
+  .superRefine((v, ctx) => {
+    if (v.idColumn === "id" && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v.id)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["id"],
+        message: "id must be a UUID when idColumn='id'",
+      });
+    }
+  });
 
 export const adminDeleteTableRow = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -392,11 +402,25 @@ export const adminDeleteTableRow = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
-const bulkDeleteInput = z.object({
-  table: z.string().min(1).max(63),
-  ids: z.array(z.string().min(1).max(200)).min(1).max(500),
-  idColumn: z.string().min(1).max(64).default("id"),
-});
+const bulkDeleteInput = z
+  .object({
+    table: z.string().min(1).max(63),
+    ids: z.array(z.string().min(1).max(200)).min(1).max(500),
+    idColumn: z.string().min(1).max(64).default("id"),
+  })
+  .superRefine((v, ctx) => {
+    if (v.idColumn === "id") {
+      const re = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      const bad = v.ids.findIndex((x) => !re.test(x));
+      if (bad >= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["ids", bad],
+          message: "all ids must be UUIDs when idColumn='id'",
+        });
+      }
+    }
+  });
 
 export const adminBulkDeleteTableRows = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])

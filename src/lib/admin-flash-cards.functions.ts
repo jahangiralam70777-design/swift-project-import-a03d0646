@@ -86,7 +86,10 @@ async function loadVisibility(supabase: unknown): Promise<Visibility> {
 export const getFlashCardVisibility = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator(noInput)
-  .handler(async ({ context }) => loadVisibility(context.supabase));
+  .handler(async ({ context }) => {
+    await assertPermission(context.supabase, context.userId, "manage_content", "flash_cards.read_visibility");
+    return loadVisibility(context.supabase);
+  });
 
 const visibilityInput = z.object({
   section_hidden: z.boolean(),

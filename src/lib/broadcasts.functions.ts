@@ -65,7 +65,16 @@ function withServerTimeout<T>(promise: PromiseLike<T>, ms: number, label: string
   });
 }
 
-async function ensureAdmin(_supabase: any, userId: string, superOnly = false) {
+async function ensureAdmin(
+  supabase: any,
+  userId: string,
+  superOnly = false,
+  action: string = superOnly ? "broadcast.super" : "broadcast.admin",
+  metadata?: Record<string, unknown>,
+) {
+  // Central audit + permission gate (Phase 3b: previously bypassed admin_action_log).
+  const { assertPermission } = await import("@/lib/admin-permissions");
+  await assertPermission(supabase, userId, "manage_content", action, metadata);
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
   const rolesToCheck = superOnly ? ["super_admin"] : ["admin", "super_admin"];
   const { data, error } = await withServerTimeout<{ data: Array<{ role: string }> | null; error: { message: string } | null }>(
@@ -171,8 +180,10 @@ async function resolveRecipients(
   filter: TargetFilter,
 ): Promise<string[]> {
   if (kind === "users") {
-    const ids = (filter.user_ids as string[]) ?? [];
-    return Array.from(new Set(ids.filter(Boolean)));
+    const raw = (filter.user_ids as unknown) ?? [];
+    const parsed = z.array(z.string().uuid()).safeParse(raw);
+    if (!parsed.success) throw new Error("target_filter.user_ids must be an array of UUIDs");
+    return Array.from(new Set(parsed.data));
   }
   if (kind === "all_students") {
     const { data } = await asAny(supabaseAdmin)

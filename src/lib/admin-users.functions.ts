@@ -446,6 +446,9 @@ export const adminSetUserStatus = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), status: statusEnum }).parse(i),
   )
   .handler(async ({ data, context }) => {
+    if (data.id === context.userId) {
+      throw new Error("You cannot change your own account status.");
+    }
     await assertPermission(
       context.supabase,
       context.userId,
@@ -482,6 +485,9 @@ export const adminSetUserRole = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), role: roleEnum, grant: z.boolean() }).parse(i),
   )
   .handler(async ({ data, context }) => {
+    if (data.id === context.userId) {
+      throw new Error("You cannot modify your own roles. Ask another admin.");
+    }
     await assertPermission(
       context.supabase,
       context.userId,
@@ -489,6 +495,21 @@ export const adminSetUserRole = createServerFn({ method: "POST" })
       data.grant ? "admin.user.role_grant" : "admin.user.role_revoke",
       { target_id: data.id, role: data.role },
     );
+    // Only super_admin can grant or revoke super_admin / admin roles.
+    if (data.role === "super_admin" || data.role === "admin") {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sb = context.supabase as any;
+      const { data: callerRoles } = await sb
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", context.userId);
+      const hasSuper = ((callerRoles ?? []) as Array<{ role: string }>).some(
+        (r) => r.role === "super_admin",
+      );
+      if (!hasSuper) {
+        throw new Error("Only super_admin can grant or revoke admin / super_admin roles.");
+      }
+    }
     // Mutate via service-role client — caller already passed manage_users check.
     // Avoids RLS edge cases on user_roles when granting/revoking roles for other users.
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
@@ -658,7 +679,12 @@ export const adminRestoreUser = createServerFn({ method: "POST" })
 export const adminHardDeleteUser = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i: { id: string; confirmName: string }) =>
-    z.object({ id: z.string().uuid(), confirmName: z.string().min(1) }).parse(i),
+    z
+      .object({
+        id: z.string().uuid(),
+        confirmName: z.string().transform((v) => v.trim()).pipe(z.string().min(1)),
+      })
+      .parse(i),
   )
   .handler(async ({ data, context }) => {
     const tag = `[adminHardDeleteUser:${data.id}]`;
