@@ -583,7 +583,24 @@ export function McqFlow() {
   });
 
   // Full chapter (all MCQs), optionally truncated by session config.
-  const rawMcqs = useMemo(() => (mcqsQ.data ?? []) as Mcq[], [mcqsQ.data]);
+  // P3a-McQ-C1: merge revealMap so any downstream code reading m.correct_option
+  // / m.explanation keeps working. Pre-submit MCQs read null, which the UI
+  // already treats as "not yet revealed" (selection state, review chip).
+  const rawMcqs = useMemo(() => {
+    const base = (mcqsQ.data ?? []) as Mcq[];
+    if (!revealMapRef.current.size) return base;
+    return base.map((m) => {
+      const rv = revealMapRef.current.get(m.id);
+      if (!rv) return m;
+      return {
+        ...m,
+        correct_option: rv.correct_option ?? m.correct_option ?? null,
+        explanation: rv.explanation ?? m.explanation ?? null,
+      };
+    });
+    // revealVersion is intentional: bump triggers recomputation of the merge.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mcqsQ.data, revealVersion]);
   const allMcqs = useMemo(() => {
     if (sessionCount === "all") return rawMcqs;
     const n = Number(sessionCount);
