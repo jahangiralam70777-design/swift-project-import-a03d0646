@@ -49,6 +49,7 @@ import {
   listChapterProgress,
   listChapterPracticeAnswers,
   recordMcqPracticeProgress,
+  revealMcqAnswers,
 } from "@/lib/learning.functions";
 import { useLevels } from "@/hooks/use-levels";
 import { saveSessionAttempt } from "@/lib/student-performance.functions";
