@@ -555,7 +555,20 @@ export const recordMcqPracticeProgress = createServerFn({ method: "POST" })
       recorded = rows.length;
     }
 
-    return { recorded };
+    // P3a-McQ-C1: piggyback reveal data for the just-submitted MCQs so the
+    // client can render correct/wrong + explanation WITHOUT pre-fetching the
+    // answer key via listMcqs. The student already answered, so leaking
+    // correct_option back is intentional and scoped to these IDs only.
+    const reveals = ((mcqRows ?? []) as Array<{
+      id: string;
+      correct_option: string;
+      explanation: string | null;
+    }>).map((m) => ({
+      id: m.id,
+      correct_option: m.correct_option,
+      explanation: m.explanation ?? null,
+    }));
+    return { recorded, reveals };
   });
 
 // ---- Chapters ----
