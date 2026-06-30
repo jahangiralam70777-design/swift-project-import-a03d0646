@@ -93,6 +93,11 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
       upcomingMockR,
       recommendedQuizR,
       subjectsR,
+      // P3a-Dash-H1: all-time submission totals (`counts.quizzes` /
+      // `counts.mocks`) were previously aliased to the weekly count, so the
+      // UI showed "5 Quizzes · +5 this week" forever.
+      totalQuizSubmissionsR,
+      totalMockSubmissionsR,
     ] = await Promise.all([
       supabase.from("mcqs").select("id", { count: "exact", head: true }).eq("status", "published"),
       supabase
