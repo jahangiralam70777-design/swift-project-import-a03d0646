@@ -896,8 +896,15 @@ export function McqFlow() {
     });
   }
 
+  // P3a-McQ-H3: prevent double-submit on rapid clicks. submitAnswer kicks
+  // off async progress + outcome writes; a second click would call the
+  // incrementing `record_mcq_practice_answer` RPC twice and corrupt the
+  // "MCQs Solved" counter.
+  const submittingRef = useRef<string | null>(null);
   function submitAnswer(chosen: Choice | null) {
     if (!q || reviewMode) return;
+    if (submittingRef.current === q.id) return;
+    submittingRef.current = q.id;
     // Manual submit only — records answer, reveals correctness + explanation, NO auto-advance.
     debugMcq("submit trigger", {
       currentIndex: current,
@@ -917,41 +924,45 @@ export function McqFlow() {
     const mcqId = q.id;
     const timeMs = Math.max(0, Date.now() - questionStartRef.current);
     void (async () => {
-      if (chosen !== null) {
-        try {
-          await recordPracticeProgressFn({
-            data: {
-              level: level ?? null,
-              subjectId: subjectId ?? null,
-              chapterId: chapterId ?? null,
-              answers: [{ mcqId, chosen, timeMs: Math.min(timeMs, 60 * 60 * 1000) }],
-            },
-          });
-        } catch (e) {
-          debugMcq("practice progress record failed", e);
-        } finally {
-          await refreshPracticeProgress();
+      try {
+        if (chosen !== null) {
+          try {
+            await recordPracticeProgressFn({
+              data: {
+                level: level ?? null,
+                subjectId: subjectId ?? null,
+                chapterId: chapterId ?? null,
+                answers: [{ mcqId, chosen, timeMs: Math.min(timeMs, 60 * 60 * 1000) }],
+              },
+            });
+          } catch (e) {
+            debugMcq("practice progress record failed", e);
+          } finally {
+            await refreshPracticeProgress();
+          }
         }
-      }
 
-      // Wrong/mastery outcomes are intentionally isolated from Practice progress.
-      // A failure here must never block Chapter Status / Progress / YOUR PROGRESS refreshes,
-      // and instant mode must not record the same wrong answer again at batch finish.
-      if (sessionMode === "instant") {
-        try {
-          await recordOutcomesFn({
-            data: {
-              level: level ?? null,
-              subjectId: subjectId ?? null,
-              chapterId: chapterId ?? null,
-              outcomes: [{ mcqId, chosen }],
-            },
-          });
-          qc.invalidateQueries({ queryKey: ["mcq-wrong"] });
-          qc.invalidateQueries({ queryKey: ["mcq-review-counts"] });
-        } catch (e) {
-          debugMcq("wrong/mastery outcome record failed", e);
+        // Wrong/mastery outcomes are intentionally isolated from Practice progress.
+        // A failure here must never block Chapter Status / Progress / YOUR PROGRESS refreshes,
+        // and instant mode must not record the same wrong answer again at batch finish.
+        if (sessionMode === "instant") {
+          try {
+            await recordOutcomesFn({
+              data: {
+                level: level ?? null,
+                subjectId: subjectId ?? null,
+                chapterId: chapterId ?? null,
+                outcomes: [{ mcqId, chosen }],
+              },
+            });
+            qc.invalidateQueries({ queryKey: ["mcq-wrong"] });
+            qc.invalidateQueries({ queryKey: ["mcq-review-counts"] });
+          } catch (e) {
+            debugMcq("wrong/mastery outcome record failed", e);
+          }
         }
+      } finally {
+        if (submittingRef.current === mcqId) submittingRef.current = null;
       }
     })();
   }
