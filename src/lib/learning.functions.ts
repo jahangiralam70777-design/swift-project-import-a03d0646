@@ -610,7 +610,7 @@ export const listMcqs = createServerFn({ method: "POST" })
       option_b: string;
       option_c: string;
       option_d: string;
-      correct_option: string;
+      correct_option: string | null;
       explanation: string | null;
       tags: string[] | null;
     }> = [];
@@ -618,9 +618,11 @@ export const listMcqs = createServerFn({ method: "POST" })
       const to = Math.min(from + PAGE_SIZE - 1, maxRows - 1);
       let q = sb
         .from("mcqs")
-        .select(
-          "id,question,option_a,option_b,option_c,option_d,correct_option,explanation,tags",
-        )
+        // P3a-McQ-C1: NEVER project correct_option/explanation in the
+        // pre-submission list. They are revealed per-MCQ via
+        // recordMcqPracticeProgress (on submit) or revealMcqAnswers
+        // (for review/wrong-questions rehydration, gated by attempt evidence).
+        .select("id,question,option_a,option_b,option_c,option_d,tags")
         .eq("status", "published")
         .order("created_at", { ascending: true })
         .range(from, to);
@@ -628,10 +630,57 @@ export const listMcqs = createServerFn({ method: "POST" })
       else if (chapterIds) q = q.in("chapter_id", chapterIds);
       const { data: page, error } = await q;
       if (error) throw error;
-      rows.push(...(page ?? []));
+      rows.push(
+        ...((page ?? []).map((r) => ({
+          ...r,
+          correct_option: null as string | null,
+          explanation: null as string | null,
+        }))),
+      );
       if (!page || page.length < to - from + 1) break;
     }
     return rows;
+  });
+
+// P3a-McQ-C1: post-submission reveal. Returns correct_option + explanation
+// ONLY for MCQs the caller has demonstrably attempted (mcq_practice_progress
+// row OR attempt_answers row). Prevents enumeration of answer-keys for
+// quizzes the user hasn't taken. Used by:
+//   * McqFlow review screen (after batch finalize)
+//   * WrongQuestionsFlow (user already attempted these by definition)
+//   * Resume-progress rehydration
+const revealSchema = z.object({
+  mcqIds: z.array(z.string().uuid()).min(1).max(500),
+});
+
+export const revealMcqAnswers = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((i: z.infer<typeof revealSchema>) => revealSchema.parse(i))
+  .handler(async ({ data, context }) => {
+    const { supabase, userId } = context;
+    // Evidence the caller has actually answered each MCQ.
+    const [practiceR, attemptR] = await Promise.all([
+      supabase
+        .from("mcq_practice_progress")
+        .select("mcq_id")
+        .eq("user_id", userId)
+        .in("mcq_id", data.mcqIds),
+      supabase
+        .from("attempt_answers")
+        .select("mcq_id,exam_attempts!inner(user_id)")
+        .eq("exam_attempts.user_id", userId)
+        .in("mcq_id", data.mcqIds),
+    ]);
+    const allowed = new Set<string>();
+    for (const r of practiceR.data ?? []) allowed.add(r.mcq_id);
+    for (const r of attemptR.data ?? []) allowed.add(r.mcq_id);
+    if (!allowed.size) return [] as Array<{ id: string; correct_option: string; explanation: string | null }>;
+    const { data: mcqs, error } = await supabase
+      .from("mcqs")
+      .select("id,correct_option,explanation")
+      .in("id", Array.from(allowed));
+    if (error) throw error;
+    return (mcqs ?? []) as Array<{ id: string; correct_option: string; explanation: string | null }>;
   });
 
 // ---- Quizzes ----
