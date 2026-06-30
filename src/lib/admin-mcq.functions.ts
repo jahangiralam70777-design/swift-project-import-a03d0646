@@ -5,6 +5,7 @@ import { assertPermission } from "@/lib/admin-permissions";
 import { enforceRateLimit, RATE_LIMITS, rateLimitKey } from "@/integrations/security/rate-limit";
 import { mcqBulkImportItemSchema } from "@/lib/mcq-bulk-schema";
 import { fingerprintQuestion } from "@/lib/mcq-parse";
+import { noInput } from "@/lib/validate";
 
 // ---------- Shared schemas ----------
 const optionStr = z.string().trim().min(1).max(1000);
@@ -107,6 +108,7 @@ export type McqDashboardStats = {
 
 export const adminMcqDashboardStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }): Promise<McqDashboardStats> => {
     await assertPermission(context.supabase, context.userId, "manage_content");
     const sb = context.supabase;
@@ -341,6 +343,7 @@ export const adminMcqDashboardStats = createServerFn({ method: "GET" })
 // ---------- Levels (admin view) ----------
 export const adminListLevels = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }) => {
     await assertPermission(context.supabase, context.userId, "manage_content");
     const { data, error } = await context.supabase

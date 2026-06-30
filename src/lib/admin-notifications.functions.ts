@@ -159,11 +159,15 @@ export const adminDeleteNotification = createServerFn({ method: "POST" })
   });
 
 // ---------- Send / Schedule / Pause ----------
+const MAX_NOTIFICATION_RECIPIENTS = 50_000;
+
 export const adminSendNotification = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((i: { id: string }) => z.object({ id: z.string().uuid() }).parse(i))
   .handler(async ({ data, context }) => {
-    await assertPermission(context.supabase, context.userId, "manage_content");
+    await assertPermission(context.supabase, context.userId, "manage_content", "notification.send", {
+      id: data.id,
+    });
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
     const { data: n, error } = await asAny(supabaseAdmin)
       .from("notifications")
@@ -173,6 +177,11 @@ export const adminSendNotification = createServerFn({ method: "POST" })
       .single();
     if (error) throw error;
     const recipients = await resolveNotificationRecipients(supabaseAdmin, n);
+    if (recipients.length > MAX_NOTIFICATION_RECIPIENTS) {
+      throw new Error(
+        `Recipient count ${recipients.length} exceeds limit of ${MAX_NOTIFICATION_RECIPIENTS}. Narrow the audience.`,
+      );
+    }
     const now = new Date().toISOString();
     const rows = recipients.map((uid) => ({
       user_id: uid,
@@ -212,11 +221,22 @@ export const adminSetNotificationStatus = createServerFn({ method: "POST" })
     z.object({ id: z.string().uuid(), status: statusEnum }).parse(i),
   )
   .handler(async ({ data, context }) => {
-    await assertPermission(context.supabase, context.userId, "manage_content");
+    await assertPermission(context.supabase, context.userId, "manage_content", "notification.set_status", {
+      id: data.id,
+      status: data.status,
+    });
+    // Admin master records (user_id IS NULL) must not be set to user-facing
+    // statuses; that corrupts the broadcast state machine.
+    if (data.status === "read" || data.status === "unread") {
+      throw new Error(
+        `Status '${data.status}' is reserved for per-user notification rows, not broadcast records.`,
+      );
+    }
     const { error } = await context.supabase
       .from("notifications")
       .update({ status: data.status })
-      .eq("id", data.id);
+      .eq("id", data.id)
+      .is("user_id", null);
     if (error) throw error;
     return { ok: true };
   });

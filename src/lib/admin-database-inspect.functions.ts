@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
 import { sanitizeSearchTerm } from "@/lib/admin-search-sanitize";
+import { noInput } from "@/lib/validate";
 import { z } from "zod";
 
 // Tables we block from writes/deletes via the Database Manager — manage them
@@ -64,6 +65,7 @@ export type PublicTableInfo = {
 
 export const adminListPublicTables = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
+  .inputValidator(noInput)
   .handler(async ({ context }): Promise<PublicTableInfo[]> => {
     await assertPermission(context.supabase, context.userId, "manage_system");
     console.log("[admin-db] list tables request", { userId: context.userId });
