@@ -127,8 +127,13 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         .limit(50),
       supabase
         .from("notifications")
-        .select("id,title,body,priority,sent_at,created_at,type")
+        .select("id,title,body,priority,sent_at,created_at,type,user_id")
         .eq("status", "sent")
+        // P3a-Dash-C4: notifications must be scoped to this user OR be a
+        // platform-wide broadcast (user_id IS NULL). Without this filter
+        // the snapshot leaked every user-targeted notification to every
+        // student.
+        .or(`user_id.is.null,user_id.eq.${userId}`)
         .order("sent_at", { ascending: false, nullsFirst: false })
         .limit(6),
       supabase
@@ -136,6 +141,9 @@ export const studentDashboardSnapshot = createServerFn({ method: "GET" })
         .select("id,title,total_questions,duration_seconds,starts_at,kind,created_at")
         .eq("status", "published")
         .eq("kind", "mock")
+        // P3a-Dash-H4: only surface mocks that have NOT yet started, so the
+        // "Upcoming Mock" card never shows an expired test.
+        .gte("starts_at", new Date().toISOString())
         .order("starts_at", { ascending: true, nullsFirst: false })
         .limit(1),
       supabase
