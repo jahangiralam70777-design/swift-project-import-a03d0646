@@ -4,6 +4,7 @@ import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { assertPermission } from "@/lib/admin-permissions";
 import { sanitizeSearchTerm } from "@/lib/admin-search-sanitize";
 import { syncModuleHiddenFlag } from "@/lib/module-visibility.functions";
+import { noInput } from "@/lib/validate";
 
 const statusEnum = z.enum(["draft", "published", "archived"]);
 const kindEnum = z.enum(["youtube", "playlist", "upload"]);
