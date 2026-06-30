@@ -430,7 +430,7 @@ export const recordMcqPracticeProgress = createServerFn({ method: "POST" })
     const ids = Array.from(new Set(answered.map((a) => a.mcqId)));
     const { data: mcqRows, error: mcqError } = await supabase
       .from("mcqs")
-      .select("id,chapter_id,correct_option,status")
+      .select("id,chapter_id,correct_option,explanation,status")
       .in("id", ids)
       .eq("status", "published");
     if (mcqError) throw mcqError;
