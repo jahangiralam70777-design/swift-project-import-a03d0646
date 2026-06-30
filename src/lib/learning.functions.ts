@@ -649,7 +649,7 @@ export const listMcqs = createServerFn({ method: "POST" })
 //   * McqFlow review screen (after batch finalize)
 //   * WrongQuestionsFlow (user already attempted these by definition)
 //   * Resume-progress rehydration
-const revealSchema = z.object({
+const revealMcqsSchema = z.object({
   mcqIds: z.array(z.string().uuid()).min(1).max(500),
 });
 
