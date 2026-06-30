@@ -1114,14 +1114,21 @@ export function McqFlow() {
               timeMs: Math.min(a?.timeMs ?? 0, 60 * 60 * 1000),
             };
           });
-          await recordPracticeProgressFn({
-            data: {
-              level: level ?? null,
-              subjectId: subjectId ?? null,
-              chapterId: chapterId ?? null,
-              answers: progressAnswers,
-            },
-          });
+          // P3a-McQ-H4: in instant mode, submitAnswer already recorded each
+          // answer per-question via record_mcq_practice_answer, which
+          // increments attempt_count. Re-recording the whole batch here
+          // would double-count every submission. Only submit-end mode
+          // needs the batch flush.
+          if (sessionMode === "submit-end") {
+            await recordPracticeProgressFn({
+              data: {
+                level: level ?? null,
+                subjectId: subjectId ?? null,
+                chapterId: chapterId ?? null,
+                answers: progressAnswers,
+              },
+            });
+          }
         } catch (e) {
           debugMcq("record practice progress failed", e);
         }
