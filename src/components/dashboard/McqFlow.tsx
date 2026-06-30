@@ -424,6 +424,34 @@ export function McqFlow() {
   const listChapterProgressFn = useServerFn(listChapterProgress);
   const listChapterPracticeAnswersFn = useServerFn(listChapterPracticeAnswers);
   const recordPracticeProgressFn = useServerFn(recordMcqPracticeProgress);
+  const revealMcqAnswersFn = useServerFn(revealMcqAnswers);
+
+  // P3a-McQ-C1: server no longer ships correct_option/explanation in listMcqs.
+  // We accumulate reveals from (a) per-submit `recordMcqPracticeProgress`
+  // response, and (b) `revealMcqAnswers` calls for review / hydrate paths
+  // (those calls are server-gated to MCQs the user has actually attempted).
+  const revealMapRef = useRef<Map<string, { correct_option: string | null; explanation: string | null }>>(new Map());
+  const [revealVersion, setRevealVersion] = useState(0);
+  const bumpReveal = useCallback(() => setRevealVersion((v) => v + 1), []);
+  const ingestReveals = useCallback(
+    (items: Array<{ id: string; correct_option: string | null; explanation: string | null }>) => {
+      if (!items?.length) return;
+      let changed = false;
+      for (const it of items) {
+        if (!it?.id) continue;
+        const prev = revealMapRef.current.get(it.id);
+        if (!prev || prev.correct_option !== it.correct_option || prev.explanation !== it.explanation) {
+          revealMapRef.current.set(it.id, {
+            correct_option: it.correct_option ?? null,
+            explanation: it.explanation ?? null,
+          });
+          changed = true;
+        }
+      }
+      if (changed) bumpReveal();
+    },
+    [bumpReveal],
+  );
   const saveAttemptFn = useServerFn(saveSessionAttempt);
   const toggleBookmarkFn = useServerFn(toggleMcqBookmark);
   const listBookmarkIdsFn = useServerFn(listMyBookmarkIds);
